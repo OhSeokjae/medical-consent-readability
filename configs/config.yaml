@@ -1,0 +1,202 @@
+# Project Configuration
+project:
+  name: "ICF Readability Analysis"
+  version: "0.1.0"
+
+# CRIS Crawling Settings
+cris:
+  base_url: "https://cris.nih.go.kr"
+  search_url: "https://cris.nih.go.kr/cris/search/search_result_st01_en.jsp"
+  detail_url: "https://cris.nih.go.kr/cris/search/detailSearch.do"
+  max_pages: 100
+  delay_seconds: 2
+  output_dir: "data/raw"
+
+# Public Data Portal API
+api:
+  base_url: "http://apis.data.go.kr/1352159/crisinfodataview/list"
+  page_size: 50
+
+# ──────────────────────────────────────────────
+# Readability Metrics (Korean)
+# ──────────────────────────────────────────────
+# 근거 연구:
+#   [R1] 이순영(2017), "글의 수준을 평가하는 국어 이독성 공식", 독서연구
+#   [R2] 최임순 외(2016), "임상시험 시험대상자설명서의 가독성 평가", 대한임상약학회지
+#   [R3] Lee & Lee(2023), "KRIT: Korean Readability Index with Hybrid Transformer", KAIST
+#   [R4] 국립국어원(2023), "국어 기초 어휘 선정 및 어휘 등급화 연구"
+#   [R5] Paasche-Orlow et al.(2003), NEJM — ICF readability (Flesch-Kincaid, SMOG 기준)
+readability:
+  # ── (A) 난이도 등급 ──
+  # R1 이독성 공식의 학년 수준 + R5 국제 ICF 권장 기준(≤8th grade)을 결합
+  grade_levels:
+    easy: "Easy"          # ≤ 중학교 2학년 (≤ grade 8) — 국제 ICF 권장 수준
+    moderate: "Moderate"  # 고등학교 수준 (grade 9-12)
+    difficult: "Difficult"  # 대학 이상 (≥ grade 13)
+
+  # ── (B) 한국어 이독성 공식 [R1] ──
+  # 학년 수준 = 4.874 + (0.591 × 평균 문장 길이) − (9.201 × 쉬운 단어 비율)
+  # - 평균 문장 길이: 문장당 평균 어절 수
+  # - 쉬운 단어 비율: 국립국어원 기초어휘 1-2등급에 해당하는 어절 비율
+  korean_readability_formula:
+    intercept: 4.874
+    coeff_sentence_length: 0.591
+    coeff_easy_word_ratio: -9.201
+
+  # ── (C) 개별 언어 지표 ──
+  metrics:
+    # C-1. 문장 수준 지표
+    sentence:
+      avg_sentence_length:          # 문장당 평균 어절 수 [R1, R2]
+        description: "문장당 평균 어절(띄어쓰기 단위) 수"
+        thresholds:
+          easy: 15                  # ≤15 어절: 쉬움
+          difficult: 25             # ≥25 어절: 어려움
+      max_sentence_length:          # 최장 문장 길이
+        description: "가장 긴 문장의 어절 수"
+      avg_clause_count:             # 문장당 평균 절(clause) 수
+        description: "문장당 평균 절 수 (내포절/접속절 포함)"
+        thresholds:
+          easy: 2
+          difficult: 4
+
+    # C-2. 어휘 수준 지표 [R1, R2, R4]
+    vocabulary:
+      easy_word_ratio:              # 쉬운 단어 비율 [R1 이독성 공식 핵심 변수]
+        description: "국립국어원 기초어휘(1-2등급) 해당 비율"
+        source: "국립국어원 2023 기초어휘 목록 (4만 어휘, 5등급)"
+        thresholds:
+          easy: 0.75                # ≥75%: 쉬움 (초등~중학 수준)
+          difficult: 0.50           # ≤50%: 어려움 (전문가 수준)
+      technical_term_ratio:         # 의학 전문용어 비율 [R2]
+        description: "대한의사협회 의학용어집(6판, 50,369개) 기반 전문용어 비율"
+        source: "대한의사협회 의학용어집 제6판"
+        thresholds:
+          easy: 0.05                # ≤5%: 쉬움
+          difficult: 0.15           # ≥15%: 어려움
+      sino_korean_ratio:            # 한자어 비율 [R2]
+        description: "전체 어휘 중 한자어 비율"
+        thresholds:
+          easy: 0.30                # ≤30%: 쉬움
+          difficult: 0.50           # ≥50%: 어려움
+      type_token_ratio:             # 어휘 다양성 (TTR)
+        description: "고유 어휘 수 / 전체 어휘 수"
+
+    # C-3. 형태소 수준 지표
+    morpheme:
+      avg_morphemes_per_word:       # 어절당 평균 형태소 수
+        description: "어절당 형태소 분석 결과 평균 형태소 수"
+        thresholds:
+          easy: 2.5
+          difficult: 4.0
+      passive_causative_ratio:      # 피동·사동 표현 비율
+        description: "피동·사동 접미사(-이/히/리/기/우/추 등) 포함 어절 비율"
+
+    # C-4. 문서 수준 지표
+    document:
+      total_sentences:              # 전체 문장 수
+        description: "전체 문장 수"
+      total_words:                  # 전체 어절 수
+        description: "전체 어절 수"
+      avg_paragraph_length:         # 문단당 평균 문장 수
+        description: "문단당 평균 문장 수"
+
+  # ── (D) 종합 점수 산출 가중치 ──
+  # 종합 가독성 점수 = 가중합 → 0-100 스케일 정규화 (높을수록 읽기 쉬움)
+  composite_weights:
+    korean_readability_grade: 0.30  # [R1] 이독성 공식 학년 수준 (역변환)
+    easy_word_ratio: 0.25           # [R1, R4] 쉬운 단어 비율
+    avg_sentence_length: 0.20       # [R1, R2] 평균 문장 길이 (역변환)
+    technical_term_ratio: 0.15      # [R2] 의학 전문용어 비율 (역변환)
+    sino_korean_ratio: 0.10         # [R2] 한자어 비율 (역변환)
+
+  # ── (E) 분석 도구 ──
+  tools:
+    morpheme_analyzer: "mecab-ko"   # 형태소 분석기 (은전한닢 MeCab-ko)
+    easy_word_source: "nikl_2023"   # 국립국어원 2023 기초어휘 목록
+    medical_term_source: "kma_6th"  # 대한의사협회 의학용어집 제6판
+
+# Required Elements (KGCP 제7호아목10) — 의약품 임상시험 관리기준)
+required_elements:
+  - id: "research_purpose"
+    name: "임상시험이 연구 목적으로 수행된다는 사실"
+    kgcp_ref: "가)"
+  - id: "study_objective"
+    name: "임상시험의 목적"
+    kgcp_ref: "나)"
+  - id: "drug_info_randomization"
+    name: "임상시험용 의약품 정보 및 시험군/대조군 무작위배정 확률"
+    kgcp_ref: "다)"
+  - id: "procedures"
+    name: "침습적 시술 포함 각종 검사나 절차"
+    kgcp_ref: "라)"
+  - id: "compliance"
+    name: "대상자가 준수하여야 할 사항"
+    kgcp_ref: "마)"
+  - id: "unverified_trial"
+    name: "검증되지 않은 임상시험이라는 사실"
+    kgcp_ref: "바)"
+  - id: "risks"
+    name: "예상되는 위험이나 불편 (임부→태아, 수유부→영유아 포함)"
+    kgcp_ref: "사)"
+  - id: "benefits"
+    name: "기대되는 이익 또는 이익이 없다는 사실"
+    kgcp_ref: "아)"
+  - id: "alternatives"
+    name: "대체 치료방법 및 그 위험과 이익"
+    kgcp_ref: "자)"
+  - id: "injury_compensation"
+    name: "손상 발생 시 보상이나 치료"
+    kgcp_ref: "차)"
+  - id: "financial_compensation"
+    name: "참여에 따른 금전적 보상"
+    kgcp_ref: "카)"
+  - id: "expected_cost"
+    name: "참여에 따른 예상 비용"
+    kgcp_ref: "타)"
+  - id: "voluntary_participation"
+    name: "참여는 자발적이며, 거부/중단해도 불이익 없음"
+    kgcp_ref: "파)"
+  - id: "record_access"
+    name: "모니터요원, 점검자, IRB, 규제기관의 기록 열람 가능성"
+    kgcp_ref: "하)"
+  - id: "confidentiality"
+    name: "신상 기록의 비밀 보호"
+    kgcp_ref: "거)"
+  - id: "new_information"
+    name: "참여 여부에 영향을 줄 새로운 정보의 적시 전달"
+    kgcp_ref: "너)"
+  - id: "contact"
+    name: "추가 정보 필요 시 또는 피해 발생 시 문의처"
+    kgcp_ref: "더)"
+  - id: "termination"
+    name: "임상시험 참여 중지 경우 및 사유"
+    kgcp_ref: "러)"
+  - id: "duration"
+    name: "예상 참여 기간"
+    kgcp_ref: "머)"
+  - id: "num_subjects"
+    name: "참여하는 대략의 대상자 수"
+    kgcp_ref: "버)"
+
+# Model Settings
+model:
+  name: "monologg/kobert"
+  max_length: 512
+  batch_size: 32
+  learning_rate: 2e-5
+  epochs: 10
+  num_labels_completeness: 20  # KGCP 필수 항목 수
+  num_labels_complexity: 3     # High/Medium/Low
+
+# LLM API Settings (OpenAI)
+llm:
+  provider: "openai"
+  model: "gpt-4o"
+  max_tokens: 16000
+  target_grade: "중학교 2학년"
+
+# Output Settings
+output:
+  figures_dir: "outputs/figures"
+  reports_dir: "outputs/reports"
